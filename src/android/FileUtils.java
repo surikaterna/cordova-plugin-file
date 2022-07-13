@@ -61,6 +61,18 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 
+/*
+ * The fix I made to this plugin was mostly to replace
+*   if(srcURLstr.contains("cdvfile://localhost/files/"))
+    {
+        srcURLstr = srcURLstr.replace("cdvfile://localhost/files/", "file:///__cdvfile_files__/");
+    }
+ * Haven't found the source where these gets called but cdvfile://localhost/files/ is not really supported
+ * Thus, I have to replace it with file:///__cdvfile_files__/
+ * 
+ * These are on the most "No installed handlers for this URL" errors.
+ */
+
 /**
  * This class provides file and directory services to JavaScript.
  */
@@ -120,6 +132,20 @@ public class FileUtils extends CordovaPlugin {
     	if (fs != null && filesystemForName(fs.name)== null) {
     		this.filesystems.add(fs);
     	}
+    }
+
+    private String fixPathCDV(String path)
+    {
+        
+        if (path.contains("cdvfile://localhost/"))
+        {
+            String nPath = path.replace("cdvfile://localhost/", "");
+            int indexOfSlash = nPath.indexOf('/');
+            String fPath = nPath.substring(0, indexOfSlash);
+            path = path.replace("cdvfile://localhost/"+ fPath +"/", "file:///__cdvfile_"+ fPath +"__/");
+        }
+
+        return path;
     }
 
     private Filesystem filesystemForName(String name) {
@@ -452,8 +478,16 @@ public class FileUtils extends CordovaPlugin {
                 public void run(JSONArray args) throws FileExistsException, IOException, TypeMismatchException, EncodingException, JSONException {
                     String dirname = args.getString(0);
                     String path = args.getString(1);
-                    String nativeURL = resolveLocalFileSystemURI(dirname).getString("nativeURL");
                     boolean containsCreate = (args.isNull(2)) ? false : args.getJSONObject(2).optBoolean("create", false);
+                    if(containsCreate)
+                    {
+                        LOG.d(LOG_TAG, "getDirectory: " + dirname + " path: " + path + " create: " + containsCreate);
+                    }
+                    if(dirname.contains("cdvfile://localhost/files/"))
+                    {
+                        dirname = dirname.replace("cdvfile://localhost/files/", "file:///__cdvfile_files__/");
+                    }
+                    String nativeURL = resolveLocalFileSystemURI(dirname).getString("nativeURL");
 
                     if(containsCreate && needPermission(nativeURL, WRITE)) {
                         getWritePermission(rawArgs, ACTION_GET_DIRECTORY, callbackContext);
@@ -645,10 +679,11 @@ public class FileUtils extends CordovaPlugin {
 
     public String filesystemPathForURL(String localURLstr) throws MalformedURLException {
         try {
+            localURLstr = fixPathCDV(localURLstr);
             LocalFilesystemURL inputURL = LocalFilesystemURL.parse(localURLstr);
             Filesystem fs = this.filesystemForURL(inputURL);
             if (fs == null) {
-                throw new MalformedURLException("No installed handlers for this URL");
+                throw new MalformedURLException("No installed handlers for this URL 10");
             }
             return fs.filesystemPathForURL(inputURL);
         } catch (IllegalArgumentException e) {
@@ -690,6 +725,7 @@ public class FileUtils extends CordovaPlugin {
                     f.run(args);
                 } catch ( Exception e) {
                     if( e instanceof EncodingException){
+                        LOG.e(LOG_TAG, "Encoding exception", e);
                         callbackContext.error(FileUtils.ENCODING_ERR);
                     } else if(e instanceof FileNotFoundException) {
                         callbackContext.error(FileUtils.NOT_FOUND_ERR);
@@ -700,10 +736,12 @@ public class FileUtils extends CordovaPlugin {
                     } else if(e instanceof InvalidModificationException ) {
                         callbackContext.error(FileUtils.INVALID_MODIFICATION_ERR);
                     } else if(e instanceof MalformedURLException ) {
+                        LOG.e(LOG_TAG, "MalformedURLException", e);
                         callbackContext.error(FileUtils.ENCODING_ERR);
                     } else if(e instanceof IOException ) {
                         callbackContext.error(FileUtils.INVALID_MODIFICATION_ERR);
                     } else if(e instanceof EncodingException ) {
+                        LOG.e(LOG_TAG, "Encoding exception", e);
                         callbackContext.error(FileUtils.ENCODING_ERR);
                     } else if(e instanceof TypeMismatchException ) {
                         callbackContext.error(FileUtils.TYPE_MISMATCH_ERR);
@@ -734,6 +772,9 @@ public class FileUtils extends CordovaPlugin {
         if (uriString == null) {
             throw new MalformedURLException("Unrecognized filesystem URL");
         }
+        
+        uriString = fixPathCDV(uriString);
+
         Uri uri = Uri.parse(uriString);
         boolean isNativeUri = false;
 
@@ -747,7 +788,7 @@ public class FileUtils extends CordovaPlugin {
         try {
             Filesystem fs = this.filesystemForURL(inputURL);
             if (fs == null) {
-                throw new MalformedURLException("No installed handlers for this URL");
+                throw new MalformedURLException("No installed handlers for this URL 15");
             }
             if (fs.exists(inputURL)) {
                 if (!isNativeUri) {
@@ -776,10 +817,11 @@ public class FileUtils extends CordovaPlugin {
      */
     private JSONArray readEntries(String baseURLstr) throws FileNotFoundException, JSONException, MalformedURLException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 1");
         	}
         	return fs.readEntriesAtLocalURL(inputURL);
 
@@ -809,6 +851,16 @@ public class FileUtils extends CordovaPlugin {
         	throw new FileNotFoundException();
         }
 
+        if(srcURLstr.contains("cdvfile://localhost/files/"))
+        {
+            srcURLstr = srcURLstr.replace("cdvfile://localhost/files/", "file:///__cdvfile_files__/");
+        }
+
+        if(destURLstr.contains("cdvfile://localhost/files/"))
+        {
+            destURLstr = destURLstr.replace("cdvfile://localhost/files/", "file:///__cdvfile_files__/");
+        }
+
         LocalFilesystemURL srcURL = LocalFilesystemURL.parse(srcURLstr);
         LocalFilesystemURL destURL = LocalFilesystemURL.parse(destURLstr);
 
@@ -836,7 +888,10 @@ public class FileUtils extends CordovaPlugin {
      */
     private boolean removeRecursively(String baseURLstr) throws FileExistsException, NoModificationAllowedException, MalformedURLException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
+            LOG.d(LOG_TAG, "removeRecursively baseURL: " + baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
+            LOG.d(LOG_TAG, "removeRecursively inputURL: " + inputURL);
         	// You can't delete the root directory.
         	if ("".equals(inputURL.path) || "/".equals(inputURL.path)) {
         		throw new NoModificationAllowedException("You can't delete the root directory");
@@ -844,7 +899,7 @@ public class FileUtils extends CordovaPlugin {
 
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 2");
         	}
         	return fs.recursiveRemoveFileAtLocalURL(inputURL);
 
@@ -867,6 +922,7 @@ public class FileUtils extends CordovaPlugin {
      */
     private boolean remove(String baseURLstr) throws NoModificationAllowedException, InvalidModificationException, MalformedURLException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
         	// You can't delete the root directory.
         	if ("".equals(inputURL.path) || "/".equals(inputURL.path)) {
@@ -876,7 +932,7 @@ public class FileUtils extends CordovaPlugin {
 
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 3");
         	}
         	return fs.removeFileAtLocalURL(inputURL);
 
@@ -903,11 +959,12 @@ public class FileUtils extends CordovaPlugin {
      */
     private JSONObject getFile(String baseURLstr, String path, JSONObject options, boolean directory) throws FileExistsException, IOException, TypeMismatchException, EncodingException, JSONException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
 
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 4");
         	}
         	return fs.getFileForLocalURL(inputURL, path, options, directory);
 
@@ -925,10 +982,11 @@ public class FileUtils extends CordovaPlugin {
      */
     private JSONObject getParent(String baseURLstr) throws JSONException, IOException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 5");
         	}
         	return fs.getParentForLocalURL(inputURL);
 
@@ -946,10 +1004,13 @@ public class FileUtils extends CordovaPlugin {
      */
     private JSONObject getFileMetadata(String baseURLstr) throws FileNotFoundException, JSONException, MalformedURLException {
         try {
+            baseURLstr = fixPathCDV(baseURLstr);
+            LOG.d(LOG_TAG, "getFileMetadata baseURL: " + baseURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(baseURLstr);
+            LOG.d(LOG_TAG, "getFileMetadata inputURL: " + inputURL);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 6");
         	}
         	return fs.getFileMetadataForLocalURL(inputURL);
 
@@ -1083,12 +1144,14 @@ public class FileUtils extends CordovaPlugin {
      * @param resultType        The desired type of data to send to the callback.
      * @return                  Contents of file.
      */
-    public void readFileAs(final String srcURLstr, final int start, final int end, final CallbackContext callbackContext, final String encoding, final int resultType) throws MalformedURLException {
+    public void readFileAs(String srcURLstr, final int start, final int end, final CallbackContext callbackContext, final String encoding, final int resultType) throws MalformedURLException {
         try {
+            srcURLstr = fixPathCDV(srcURLstr);
+
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(srcURLstr);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 7");
         	}
 
             fs.readFileAtURL(inputURL, start, end, new Filesystem.ReadFileCallback() {
@@ -1156,10 +1219,11 @@ public class FileUtils extends CordovaPlugin {
     /**/
     public long write(String srcURLstr, String data, int offset, boolean isBinary) throws FileNotFoundException, IOException, NoModificationAllowedException {
         try {
+            srcURLstr = fixPathCDV(srcURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(srcURLstr);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 8");
         	}
 
             return fs.writeToFileAtURL(inputURL, data, offset, isBinary);
@@ -1176,10 +1240,11 @@ public class FileUtils extends CordovaPlugin {
      */
     private long truncateFile(String srcURLstr, long size) throws FileNotFoundException, IOException, NoModificationAllowedException {
         try {
+            srcURLstr = fixPathCDV(srcURLstr);
         	LocalFilesystemURL inputURL = LocalFilesystemURL.parse(srcURLstr);
         	Filesystem fs = this.filesystemForURL(inputURL);
         	if (fs == null) {
-        		throw new MalformedURLException("No installed handlers for this URL");
+        		throw new MalformedURLException("No installed handlers for this URL 9");
         	}
 
             return fs.truncateFileAtURL(inputURL, size);
